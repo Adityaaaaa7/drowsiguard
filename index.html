@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>DrowsiGuard | Smart Edge Driver Monitoring System</title>
+    <meta name="description" content="Smartphone-Based Edge Driver Monitoring System with on-device MediaPipe FaceMesh, motion auto-tracking, EAR, MAR, and prolonged eye-closure detection.">
+    <meta name="theme-color" content="#0a0e17">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='128' fill='%23111827'/%3E%3Ccircle cx='256' cy='256' r='140' fill='none' stroke='%233b82f6' stroke-width='32'/%3E%3Cpath d='M160 256c30-40 60-60 96-60s66 20 96 60c-30 40-60 60-96 60s-66-20-96-60z' fill='%2310b981'/%3E%3Ccircle cx='256' cy='256' r='28' fill='%23ffffff'/%3E%3C/svg%3E">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Chart.js for Telemetry -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Paho MQTT Client (WebSockets background bridge) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    
+    <!-- MediaPipe Face Mesh CDN (Runs Locally On-Device via WebAssembly/WebGL) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <!-- Application CSS -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+    <!-- Top Cockpit Header -->
+    <header class="app-header">
+        <div class="logo-container">
+            <div class="logo-icon">
+                <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <div class="logo-text">
+                <h1>DrowsiGuard <span class="badge">Driver Monitoring</span></h1>
+                <p>Smartphone-Based Edge Driver Monitoring System</p>
+            </div>
+        </div>
+
+        <!-- Desktop Navigation Bar (Streamlined: Monitor, Telemetry, Settings) -->
+        <nav class="nav-desktop">
+            <button class="nav-btn active" data-tab="tab-detector">
+                <i class="fa-solid fa-video"></i> Monitor
+            </button>
+            <button class="nav-btn" data-tab="tab-telemetry">
+                <i class="fa-solid fa-chart-line"></i> Telemetry
+            </button>
+            <button class="nav-btn" data-tab="tab-settings">
+                <i class="fa-solid fa-sliders"></i> Settings
+            </button>
+        </nav>
+
+        <div class="header-actions">
+            <button id="btn-audio-toggle" class="icon-btn" title="Toggle Alarm Audio">
+                <i class="fa-solid fa-volume-high"></i>
+            </button>
+            <div id="system-status-pill" class="status-pill status-ready">
+                <span class="pulse-dot"></span> System Ready
+            </div>
+        </div>
+    </header>
+
+    <!-- Main App Container -->
+    <main class="main-container">
+
+        <!-- Fullscreen Alarm Warning Banner Overlay (Shown when Drowsy) -->
+        <div id="alarm-overlay" class="alarm-overlay hidden">
+            <div class="alarm-content">
+                <div class="alarm-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                <h1 class="alarm-title">DROWSINESS DETECTED</h1>
+                <p class="alarm-subtitle">WAKE UP! DRIVER IS DROWSY OR ASLEEP</p>
+                <div class="alarm-action">
+                    <button id="btn-dismiss-alarm" class="btn-warning-dismiss">DISMISS ALERT</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================================================= -->
+        <!-- SECTION 1: MONITOR (Dedicated Driver Cockpit View)                       -->
+        <!-- ========================================================================= -->
+        <section id="tab-detector" class="tab-content active">
+            
+            <!-- Quick Status Bar on Cockpit -->
+            <div class="monitor-quick-bar">
+                <div id="tracking-status-pill" class="quick-pill badge-success"><i class="fa-solid fa-arrows-to-dot"></i> Motion Auto-Track: ON</div>
+                <div class="quick-pill"><i class="fa-solid fa-gauge-high"></i> FPS: <span id="val-fps">0</span></div>
+                <div class="quick-pill"><i class="fa-solid fa-clock"></i> Drowsy Delay: <span id="lbl-status-delay">3.5s</span></div>
+            </div>
+
+            <div class="grid-detector">
+                
+                <!-- Left: Main Camera Feed & On-Device Landmarks -->
+                <div class="card video-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-camera"></i> Driver Camera Feed</h2>
+                        <div class="camera-controls">
+                            <button id="btn-toggle-autotrack" class="btn-subtle active" title="Toggle Motion Auto-Tracking">
+                                <i class="fa-solid fa-arrows-to-dot"></i> Auto-Track: ON
+                            </button>
+                            <button id="btn-toggle-landmarks" class="btn-subtle active" title="Toggle 468-point Face Mesh">
+                                <i class="fa-solid fa-network-wired"></i> Mesh
+                            </button>
+                            <button id="btn-switch-camera" class="btn-subtle" title="Flip Camera (Front/Rear)">
+                                <i class="fa-solid fa-camera-rotate"></i> Flip
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="video-wrapper">
+                        <video id="webcam-feed" playsinline autocomplete="off" muted></video>
+                        <canvas id="output-canvas"></canvas>
+                        
+                        <div id="camera-placeholder" class="camera-placeholder">
+                            <i class="fa-solid fa-video-slash"></i>
+                            <p>Driver monitoring camera is inactive</p>
+                            <button id="btn-start-camera-main" class="btn-primary">
+                                <i class="fa-solid fa-play"></i> Start Camera Stream
+                            </button>
+                        </div>
+
+                        <!-- Real-time Prediction Badge overlay on top of video -->
+                        <div id="prediction-badge" class="prediction-badge state-neutral">
+                            <span id="pred-icon"><i class="fa-solid fa-circle-notch fa-spin"></i></span>
+                            <span id="pred-text">Awaiting Camera Input</span>
+                        </div>
+
+                        <!-- Multi-Face Detection Alert Badge -->
+                        <div id="badge-multiface-alert" class="multiface-badge hidden">
+                            <i class="fa-solid fa-users"></i> Multiple Faces Detected (Tracking Driver)
+                        </div>
+                    </div>
+
+                    <div class="video-footer">
+                        <div class="source-indicator"><i class="fa-solid fa-circle-info"></i> <span id="val-source">Local Device Camera (On-Device Processing)</span></div>
+                    </div>
+
+                    <!-- Quick Simulation Test Presets Bar -->
+                    <div class="sim-quick-bar">
+                        <span class="sim-label"><i class="fa-solid fa-flask"></i> Quick Simulation Tests:</span>
+                        <div class="sim-buttons-row">
+                            <button class="btn-sim-preset btn-sim-awake" data-sim="awake">
+                                <i class="fa-solid fa-face-smile"></i> Normal Blinks (Awake)
+                            </button>
+                            <button class="btn-sim-preset btn-sim-drowsy" data-sim="drowsy">
+                                <i class="fa-solid fa-face-flushed"></i> Continuous Closure (3.5s)
+                            </button>
+                            <button class="btn-sim-preset btn-sim-slowblinks" data-sim="slowblinks">
+                                <i class="fa-solid fa-hourglass-half"></i> 5x Slow Closures (>3s)
+                            </button>
+                            <button class="btn-sim-preset btn-sim-yawn" data-sim="yawning">
+                                <i class="fa-solid fa-face-tired"></i> Yawning
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right: Cockpit Analytics, Gauges & State -->
+                <div class="analytics-sidebar">
+                    
+                    <!-- Main Driver State Box -->
+                    <div class="card state-box-card">
+                        <div class="card-header">
+                            <h3>Current Driver State</h3>
+                        </div>
+                        <div id="status-card-body" class="state-display state-awake">
+                            <div class="state-icon" id="state-hero-icon">
+                                <i class="fa-solid fa-user-check"></i>
+                            </div>
+                            <div class="state-info">
+                                <span class="state-label">ON-DEVICE EDGE STATE</span>
+                                <h2 id="state-title-text" class="state-title">AWAKE</h2>
+                                <p id="state-desc-text" class="state-desc">Normal alertness detected</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- EAR, MAR & PERCLOS Live Gauges -->
+                    <div class="card gauges-card">
+                        <div class="card-header">
+                            <h3>Physiological Metrics</h3>
+                        </div>
+                        <div class="gauges-grid">
+                            <!-- Eye Aspect Ratio (EAR) -->
+                            <div class="gauge-item">
+                                <div class="gauge-header">
+                                    <span>Eye Aspect Ratio (EAR)</span>
+                                    <span id="val-ear" class="metric-num">0.00</span>
+                                </div>
+                                <div class="progress-track">
+                                    <div id="bar-ear" class="progress-fill ear-fill" style="width: 0%"></div>
+                                    <div class="threshold-line" style="left: 46%" title="EAR Threshold (0.21)"></div>
+                                </div>
+                                <div class="gauge-sub">
+                                    <span>Closed (&lt;0.21)</span>
+                                    <span>Open (&gt;0.30)</span>
+                                </div>
+                            </div>
+
+                            <!-- Mouth Aspect Ratio (MAR) -->
+                            <div class="gauge-item">
+                                <div class="gauge-header">
+                                    <span>Mouth Aspect Ratio (MAR)</span>
+                                    <span id="val-mar" class="metric-num">0.00</span>
+                                </div>
+                                <div class="progress-track">
+                                    <div id="bar-mar" class="progress-fill mar-fill" style="width: 0%"></div>
+                                    <div class="threshold-line" style="left: 65%" title="Yawn Threshold (0.65)"></div>
+                                </div>
+                                <div class="gauge-sub">
+                                    <span>Normal (&lt;0.50)</span>
+                                    <span>Yawning (&gt;0.65)</span>
+                                </div>
+                            </div>
+
+                            <!-- PERCLOS Score -->
+                            <div class="gauge-item">
+                                <div class="gauge-header">
+                                    <span>PERCLOS (Window Score)</span>
+                                    <span id="val-perclos" class="metric-num">0%</span>
+                                </div>
+                                <div class="progress-track">
+                                    <div id="bar-perclos" class="progress-fill perclos-fill" style="width: 0%"></div>
+                                    <div class="threshold-line" style="left: 20%" title="PERCLOS Alert Threshold (20%)"></div>
+                                </div>
+                                <div class="gauge-sub">
+                                    <span>Normal (&lt;10%)</span>
+                                    <span>Fatigued (&gt;20%)</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Session Counters & Rate Tracking -->
+                    <div class="card stats-mini-card">
+                        <div class="mini-stats-grid">
+                            <div class="mini-stat">
+                                <i class="fa-solid fa-eye"></i>
+                                <span id="val-blinks" class="stat-value">0</span>
+                                <span class="stat-lbl">Normal Blinks</span>
+                            </div>
+                            <div class="mini-stat">
+                                <i class="fa-solid fa-hourglass-half"></i>
+                                <span id="val-prolonged-blinks" class="stat-value">0 / 5</span>
+                                <span class="stat-lbl">Slow Closures (&gt;3s)</span>
+                            </div>
+                            <div class="mini-stat">
+                                <i class="fa-solid fa-face-tired"></i>
+                                <span id="val-yawns" class="stat-value">0</span>
+                                <span class="stat-lbl">Yawns</span>
+                            </div>
+                            <div class="mini-stat">
+                                <i class="fa-solid fa-stopwatch"></i>
+                                <span id="val-closed-time" class="stat-value">0.0s</span>
+                                <span class="stat-lbl">Eye Closed</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Threshold Adjusters (Also in Settings) -->
+                    <div class="card settings-mini-card">
+                        <div class="card-header">
+                            <h3><i class="fa-solid fa-sliders"></i> Sensitivity Adjusters</h3>
+                        </div>
+                        <div class="setting-row">
+                            <label for="input-ear-thresh">EAR Closed Threshold:</label>
+                            <div class="setting-control">
+                                <input type="range" id="input-ear-thresh" min="0.12" max="0.30" step="0.01" value="0.21">
+                                <span id="lbl-ear-thresh">0.21</span>
+                            </div>
+                        </div>
+                        <div class="setting-row">
+                            <label for="input-time-thresh">Drowsy Delay (Seconds):</label>
+                            <div class="setting-control">
+                                <input type="range" id="input-time-thresh" min="1.0" max="6.0" step="0.1" value="3.5">
+                                <span id="lbl-time-thresh">3.5s</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SECTION 2: TELEMETRY (Real-Time Graphs, Logs & Export)                   -->
+        <!-- ========================================================================= -->
+        <section id="tab-telemetry" class="tab-content">
+            <div class="telemetry-header-card card">
+                <div>
+                    <h2><i class="fa-solid fa-chart-line"></i> Real-Time Telemetry & Data Logging</h2>
+                    <p>Continuous mathematical analysis of EAR, MAR, and PERCLOS over time with timestamped logging and export capabilities.</p>
+                </div>
+                <div class="export-buttons">
+                    <button id="btn-export-csv" class="btn-success">
+                        <i class="fa-solid fa-file-csv"></i> Export CSV
+                    </button>
+                    <button id="btn-export-json" class="btn-secondary">
+                        <i class="fa-solid fa-file-code"></i> Export JSON
+                    </button>
+                    <button id="btn-clear-telemetry" class="btn-danger-subtle">
+                        <i class="fa-solid fa-trash"></i> Reset Data
+                    </button>
+                </div>
+            </div>
+
+            <div class="charts-grid">
+                <!-- EAR Realtime Chart -->
+                <div class="card chart-card">
+                    <div class="card-header">
+                        <h3>Eye Aspect Ratio (EAR) Real-Time Timeline</h3>
+                        <span class="chart-tag tag-ear">Soukupová & Čech (2016)</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart-ear"></canvas>
+                    </div>
+                </div>
+
+                <!-- MAR Realtime Chart -->
+                <div class="card chart-card">
+                    <div class="card-header">
+                        <h3>Mouth Aspect Ratio (MAR) Real-Time Timeline</h3>
+                        <span class="chart-tag tag-mar">Yawn Analysis</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart-mar"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed Telemetry Log Table -->
+            <div class="card table-card">
+                <div class="card-header">
+                    <h3>Timestamped Telemetry Events</h3>
+                    <span id="log-count" class="badge">0 records logged</span>
+                </div>
+                <div class="table-wrapper">
+                    <table class="telemetry-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>EAR Value</th>
+                                <th>MAR Value</th>
+                                <th>PERCLOS</th>
+                                <th>Eye Status</th>
+                                <th>Prediction Result</th>
+                            </tr>
+                        </thead>
+                        <tbody id="telemetry-log-tbody">
+                            <tr class="empty-row">
+                                <td colspan="6">No telemetry records captured yet. Start camera monitoring to collect data.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SECTION 3: SETTINGS (Thresholds, Motion Tracking, Audio, Camera)          -->
+        <!-- ========================================================================= -->
+        <section id="tab-settings" class="tab-content">
+            <div class="settings-container">
+                
+                <!-- Card 1: Detection Thresholds -->
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-sliders"></i> Drowsiness & Blink Thresholds</h2>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-time-thresh">Drowsiness Delay Time</label>
+                                <p class="setting-desc">Continuous closed-eye duration before immediate Warning (Default: 3.5s)</p>
+                            </div>
+                            <div class="setting-input-wrap">
+                                <input type="range" id="setting-time-thresh" min="1.0" max="6.0" step="0.1" value="3.5">
+                                <span id="setting-lbl-time" class="setting-val-badge">3.5s</span>
+                            </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-ear-thresh">EAR Closed Threshold</label>
+                                <p class="setting-desc">Values below this indicate eye closure (Default: 0.21)</p>
+                            </div>
+                            <div class="setting-input-wrap">
+                                <input type="range" id="setting-ear-thresh" min="0.15" max="0.30" step="0.01" value="0.21">
+                                <span id="setting-lbl-ear" class="setting-val-badge">0.21</span>
+                            </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-mar-thresh">MAR Yawn Threshold</label>
+                                <p class="setting-desc">Values above this indicate a yawn (Default: 0.65)</p>
+                            </div>
+                            <div class="setting-input-wrap">
+                                <input type="range" id="setting-mar-thresh" min="0.50" max="0.85" step="0.01" value="0.65">
+                                <span id="setting-lbl-mar" class="setting-val-badge">0.65</span>
+                            </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-perclos-thresh">PERCLOS Alert Threshold</label>
+                                <p class="setting-desc">Percentage of eye closure over time triggering fatigue warning (Default: 20%)</p>
+                            </div>
+                            <div class="setting-input-wrap">
+                                <input type="range" id="setting-perclos-thresh" min="10" max="30" step="1" value="20">
+                                <span id="setting-lbl-perclos" class="setting-val-badge">20%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 2: Camera & Motion Tracking -->
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-arrows-to-dot"></i> Camera & Motion Auto-Tracking</h2>
+                    </div>
+
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-autotrack-toggle">Smart Driver Motion Following</label>
+                                <p class="setting-desc">Adjust camera viewpoint to follow head motion and tilt</p>
+                            </div>
+                            <select id="setting-autotrack-toggle" class="setting-select">
+                                <option value="true">Enabled (Auto-Framing Active)</option>
+                                <option value="false">Disabled (Fixed Viewport)</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-facing-mode">Camera Facing Mode</label>
+                                <p class="setting-desc">Front driver-facing camera or rear camera</p>
+                            </div>
+                            <select id="setting-facing-mode" class="setting-select">
+                                <option value="user">Front Camera (Driver Facing)</option>
+                                <option value="environment">Rear Camera</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-multiface-mode">Multiple Face Handling Policy</label>
+                                <p class="setting-desc">How to handle passengers appearing in camera view</p>
+                            </div>
+                            <select id="setting-multiface-mode" class="setting-select">
+                                <option value="primary">Track Primary Driver (Largest Face)</option>
+                                <option value="strict">Strict Pause (Halt until single face)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Audio & Alerts -->
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <h2><i class="fa-solid fa-volume-high"></i> Audio Warning System</h2>
+                    </div>
+                    
+                    <div class="setting-group">
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label for="setting-volume">Master Alarm Volume</label>
+                                <p class="setting-desc">Adjust speaker volume for local auditory warning</p>
+                            </div>
+                            <div class="setting-input-wrap">
+                                <input type="range" id="setting-volume" min="0" max="1" step="0.05" value="0.8">
+                                <span id="setting-lbl-volume" class="setting-val-badge">80%</span>
+                            </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label>Audio Siren Test</label>
+                                <p class="setting-desc">Verify phone audio synthesizer and haptic vibration</p>
+                            </div>
+                            <button id="btn-test-alarm" class="btn-subtle">
+                                <i class="fa-solid fa-bell"></i> Test Siren Sound
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button id="btn-save-settings" class="btn-primary">
+                            <i class="fa-solid fa-floppy-disk"></i> Apply & Save Settings
+                        </button>
+                        <button id="btn-reset-settings" class="btn-subtle">
+                            <i class="fa-solid fa-rotate-left"></i> Reset to Defaults
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Bottom Navigation Bar for Mobile Phones (Streamlined 3 Sections) -->
+    <nav class="nav-mobile-bottom">
+        <button class="mobile-nav-btn active" data-tab="tab-detector">
+            <i class="fa-solid fa-video"></i>
+            <span>Monitor</span>
+        </button>
+        <button class="mobile-nav-btn" data-tab="tab-telemetry">
+            <i class="fa-solid fa-chart-line"></i>
+            <span>Telemetry</span>
+        </button>
+        <button class="mobile-nav-btn" data-tab="tab-settings">
+            <i class="fa-solid fa-sliders"></i>
+            <span>Settings</span>
+        </button>
+    </nav>
+
+    <!-- Application JavaScript Modules -->
+    <script src="js/settingsManager.js"></script>
+    <script src="js/audioAlert.js"></script>
+    <script src="js/earMarCalculator.js"></script>
+    <script src="js/telemetryChart.js"></script>
+    <script src="js/hardwareBridge.js"></script>
+    <script src="js/faceLandmarkEngine.js"></script>
+    <script src="js/app.js"></script>
+
+</body>
+</html>
