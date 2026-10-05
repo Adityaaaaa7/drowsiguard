@@ -29,7 +29,7 @@ class TelemetryManager {
                         tension: 0.3,
                         pointRadius: 0
                     }, {
-                        label: 'Drowsy Threshold (0.21)',
+                        label: 'EAR Threshold',
                         data: [],
                         borderColor: '#ef4444',
                         borderWidth: 1,
@@ -90,7 +90,7 @@ class TelemetryManager {
     /**
      * Add new frame data point to telemetry
      */
-    addRecord(ear, mar, perclos, stateLabel, earThresh = 0.21, marThresh = 0.65) {
+    addRecord(ear, mar, perclos, stateLabel, earThresh = 0.17, marThresh = 0.65) {
         const timeStr = new Date().toLocaleTimeString();
 
         // Update Charts

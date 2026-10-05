@@ -5,10 +5,10 @@
  */
 class SettingsManager {
     constructor() {
-        this.STORAGE_KEY = 'drowsiguard_settings_v3';
+        this.STORAGE_KEY = 'drowsiguard_settings_v4';
         this.defaults = {
             // Detection Thresholds
-            earThreshold: 0.21,
+            earThreshold: 0.17,       // Calibrated for natural relaxed open eyes without straining
             marThreshold: 0.65,
             drowsyTimeThreshold: 3.5, // seconds (default 3.5s as requested)
             prolongedBlinkDuration: 3.0, // seconds: duration exceeding this counts as prolonged closure (>3s)
@@ -27,7 +27,9 @@ class SettingsManager {
             showLandmarks: true,
             autoTrackingEnabled: true, // Dynamic digital motion tracking & auto-framing
             trackingSensitivity: 0.12, // Interpolation speed for smooth PTZ panning
-            baseDigitalZoom: 1.25      // Digital crop margin for pan/tilt without edge clipping
+            baseDigitalZoom: 1.25,     // Digital crop margin for pan/tilt without edge clipping
+            driverHudMode: false,      // Driver HUD / Stealth mode to prevent night glare
+            baselineEar: 0.26          // Driver natural open-eye baseline
         };
 
         this.settings = this.load();

@@ -20,21 +20,49 @@ class EarMarCalculator {
     }
 
     /**
-     * Euclidean distance between two 3D or 2D landmarks
+     * Euclidean distance between two landmarks in physical or aspect-scaled pixel space.
+     * Eliminates mobile portrait aspect-ratio distortion and removes Z-depth jitter.
      */
-    distance(p1, p2) {
-        return Math.sqrt(
-            Math.pow(p1.x - p2.x, 2) + 
-            Math.pow(p1.y - p2.y, 2) + 
-            Math.pow((p1.z || 0) - (p2.z || 0), 2)
-        );
+    distance(p1, p2, width = 1280, height = 720) {
+        if (!p1 || !p2) return 0;
+        const dx = (p1.x - p2.x) * width;
+        const dy = (p1.y - p2.y) * height;
+        return Math.sqrt(dx * dx + dy * dy);
     }
 
     /**
-     * Calculate Eye Aspect Ratio (EAR) for a single eye
-     * Formula: (|p2 - p6| + |p3 - p5|) / (2 * |p1 - p4|)
+     * High-Precision 3-Point Eye Aspect Ratio (EAR) for a single eye
+     * Uses:
+     * - Outer vertical eyelid pair
+     * - Center vertical eyelid pair (pupil line, point of maximum deflection)
+     * - Inner vertical eyelid pair
+     * Formula: (|v_outer| + 2*|v_center| + |v_inner|) / (4.0 * |horizontal|)
      */
-    calculateSingleEar(landmarks, eyeIndices) {
+    calculateSingleEar(landmarks, eyeIndices, width = 1280, height = 720) {
+        // eyeIndices: [p_outer, p_top_outer, p_top_center, p_top_inner, p_inner, p_bot_inner, p_bot_center, p_bot_outer]
+        // Left eye indices:  [33, 160, 159, 158, 133, 153, 145, 144]
+        // Right eye indices: [362, 385, 386, 387, 263, 373, 374, 380]
+        
+        if (eyeIndices.length >= 8) {
+            const pOuter = landmarks[eyeIndices[0]];
+            const pTopOuter = landmarks[eyeIndices[1]];
+            const pTopCenter = landmarks[eyeIndices[2]];
+            const pTopInner = landmarks[eyeIndices[3]];
+            const pInner = landmarks[eyeIndices[4]];
+            const pBotInner = landmarks[eyeIndices[5]];
+            const pBotCenter = landmarks[eyeIndices[6]];
+            const pBotOuter = landmarks[eyeIndices[7]];
+
+            const vOuter = this.distance(pTopOuter, pBotOuter, width, height);
+            const vCenter = this.distance(pTopCenter, pBotCenter, width, height);
+            const vInner = this.distance(pTopInner, pBotInner, width, height);
+            const horizontal = this.distance(pOuter, pInner, width, height);
+
+            if (horizontal === 0) return 0;
+            return (vOuter + (2.0 * vCenter) + vInner) / (4.0 * horizontal);
+        }
+
+        // Backward-compatible fallback for 6-point arrays
         const p1 = landmarks[eyeIndices[0]];
         const p2 = landmarks[eyeIndices[1]];
         const p3 = landmarks[eyeIndices[2]];
@@ -42,42 +70,58 @@ class EarMarCalculator {
         const p5 = landmarks[eyeIndices[4]];
         const p6 = landmarks[eyeIndices[5]];
 
-        const vertical1 = this.distance(p2, p6);
-        const vertical2 = this.distance(p3, p5);
-        const horizontal = this.distance(p1, p4);
+        const vertical1 = this.distance(p2, p6, width, height);
+        const vertical2 = this.distance(p3, p5, width, height);
+        const horizontal = this.distance(p1, p4, width, height);
 
         if (horizontal === 0) return 0;
         return (vertical1 + vertical2) / (2.0 * horizontal);
     }
 
     /**
-     * Calculate Average EAR across Left and Right Eyes
+     * Calculate Average EAR across Left and Right Eyes with resolution scaling
      */
-    calculateEar(landmarks) {
+    calculateEar(landmarks, width = 1280, height = 720) {
         if (!landmarks || landmarks.length < 400) return 0;
 
-        const leftEar = this.calculateSingleEar(landmarks, this.LEFT_EYE);
-        const rightEar = this.calculateSingleEar(landmarks, this.RIGHT_EYE);
+        // 8-point high-precision eye landmarks
+        const LEFT_EYE_8 = [33, 160, 159, 158, 133, 153, 145, 144];
+        const RIGHT_EYE_8 = [362, 385, 386, 387, 263, 373, 374, 380];
+
+        const leftEar = this.calculateSingleEar(landmarks, LEFT_EYE_8, width, height);
+        const rightEar = this.calculateSingleEar(landmarks, RIGHT_EYE_8, width, height);
 
         return (leftEar + rightEar) / 2.0;
     }
 
     /**
-     * Calculate Mouth Aspect Ratio (MAR)
+     * Calculate High-Precision Mouth Aspect Ratio (MAR) with resolution scaling
+     * Uses 3 vertical measurement lines across inner lips
      */
-    calculateMar(landmarks) {
+    calculateMar(landmarks, width = 1280, height = 720) {
         if (!landmarks || landmarks.length < 400) return 0;
 
-        const pTop = landmarks[this.MOUTH_TOP[1]];
-        const pBottom = landmarks[this.MOUTH_BOTTOM[1]];
-        const pLeft = landmarks[this.MOUTH_LEFT];
-        const pRight = landmarks[this.MOUTH_RIGHT];
+        // Inner Lip Contour landmarks
+        // Outer vertical: 82 to 87
+        // Center vertical: 13 to 14
+        // Inner vertical: 312 to 317
+        // Horizontal: 78 to 308
+        const pLeft = landmarks[78];
+        const pRight = landmarks[308];
+        const pTopCenter = landmarks[13];
+        const pBotCenter = landmarks[14];
+        const pTopLeft = landmarks[82];
+        const pBotLeft = landmarks[87];
+        const pTopRight = landmarks[312];
+        const pBotRight = landmarks[317];
 
-        const verticalDist = this.distance(pTop, pBottom);
-        const horizontalDist = this.distance(pLeft, pRight);
+        const vLeft = this.distance(pTopLeft, pBotLeft, width, height);
+        const vCenter = this.distance(pTopCenter, pBotCenter, width, height);
+        const vRight = this.distance(pTopRight, pBotRight, width, height);
+        const horizontal = this.distance(pLeft, pRight, width, height);
 
-        if (horizontalDist === 0) return 0;
-        return verticalDist / horizontalDist;
+        if (horizontal === 0) return 0;
+        return (vLeft + (2.0 * vCenter) + vRight) / (4.0 * horizontal);
     }
 
     /**
@@ -112,3 +156,4 @@ class EarMarCalculator {
 }
 
 window.earMarCalc = new EarMarCalculator();
+

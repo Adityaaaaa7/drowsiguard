@@ -21,12 +21,19 @@ class FaceLandmarkEngine {
         this.localStream = null;
 
         // Dynamic Detection Parameters (Bound to SettingsManager)
-        this.earThreshold = 0.21;
+        this.earThreshold = 0.17; // Calibrated default: relaxed open eyes stay effortlessly AWAKE
         this.marThreshold = 0.65;
         this.drowsyTimeThreshold = 3.5; // seconds (default 3.5s as requested)
         this.prolongedBlinkDuration = 3.0; // threshold in seconds for a closure to be "prolonged"
         this.prolongedBlinkCountThreshold = 5; // >5 prolonged closures of >3s triggers drowsiness
         this.perclosThreshold = 20;     // 20%
+        this.baselineEar = 0.26;        // Personal baseline open-eye EAR
+
+        // Driver HUD & Eye Auto-Calibration
+        this.driverHudMode = false;
+        this.isCalibrating = false;
+        this.calibrationSamples = [];
+        this.calibrationTarget = 45; // ~1.5 - 2s of video frames
 
         // Motion Auto-Tracking & Virtual Pan-Tilt-Zoom (PTZ)
         this.autoTrackingEnabled = true;
@@ -86,6 +93,8 @@ class FaceLandmarkEngine {
             this.showLandmarks = window.settingsMgr.get('showLandmarks');
             this.facingMode = window.settingsMgr.get('facingMode');
             this.autoTrackingEnabled = window.settingsMgr.get('autoTrackingEnabled') !== false;
+            this.driverHudMode = window.settingsMgr.get('driverHudMode') === true;
+            this.baselineEar = window.settingsMgr.get('baselineEar') || 0.26;
 
             window.settingsMgr.onChange(settings => {
                 this.earThreshold = settings.earThreshold;
@@ -97,6 +106,12 @@ class FaceLandmarkEngine {
                 this.showLandmarks = settings.showLandmarks;
                 if (settings.autoTrackingEnabled !== undefined) {
                     this.autoTrackingEnabled = settings.autoTrackingEnabled;
+                }
+                if (settings.driverHudMode !== undefined) {
+                    this.driverHudMode = settings.driverHudMode;
+                }
+                if (settings.baselineEar !== undefined) {
+                    this.baselineEar = settings.baselineEar;
                 }
             });
         }
@@ -441,9 +456,22 @@ class FaceLandmarkEngine {
 
             this.drawTrackingBrackets(primaryBounds, this.canvasElement.width, this.canvasElement.height);
 
-            // 3. Compute Mathematical Ratios (Preserved formulas from earMarCalculator.js)
-            const ear = window.earMarCalc.calculateEar(primaryLandmarks);
-            const mar = window.earMarCalc.calculateMar(primaryLandmarks);
+            // 3. Compute Mathematical Ratios with Video Resolution Scaling (eliminates aspect ratio distortion)
+            const frameW = this.videoElement.videoWidth || this.canvasElement.width || 1280;
+            const frameH = this.videoElement.videoHeight || this.canvasElement.height || 720;
+            const ear = window.earMarCalc.calculateEar(primaryLandmarks, frameW, frameH);
+            const mar = window.earMarCalc.calculateMar(primaryLandmarks, frameW, frameH);
+
+            // Eye Auto-Calibration Sample Collection
+            if (this.isCalibrating && ear > 0.08) {
+                this.calibrationSamples.push(ear);
+                const pct = Math.min(100, Math.round((this.calibrationSamples.length / this.calibrationTarget) * 100));
+                const bar = document.getElementById('calib-progress-fill');
+                if (bar) bar.style.width = pct + '%';
+                if (this.calibrationSamples.length >= this.calibrationTarget) {
+                    this.completeCalibration();
+                }
+            }
 
             // 4. Eye Closure, Blink & Drowsiness Evaluation
             const isClosed = ear < this.earThreshold;
@@ -463,12 +491,13 @@ class FaceLandmarkEngine {
                 // Threshold Check A: Continuous eye closure >= Drowsiness Delay Time (default 3.5s)
                 if (currentClosureDuration >= this.drowsyTimeThreshold) {
                     calculatedState = 'WARNING';
-                } else if (currentClosureDuration >= 1.0) {
-                    // Continuous closure in progress, not yet 3.5s
+                } else if (currentClosureDuration >= 0.45) {
+                    // Continuous closure in progress beyond a normal blink (>450ms)
                     calculatedState = 'EYES_CLOSING';
                 } else {
-                    // Brief closure in progress (momentary blink)
-                    calculatedState = 'BLINKING';
+                    // Brief closure in progress (momentary normal blink <450ms):
+                    // Keep status smoothly in AWAKE so driver is never stressed by screen flashing
+                    calculatedState = 'AWAKE';
                 }
             } else {
                 // EYES ARE OPEN:
@@ -476,10 +505,11 @@ class FaceLandmarkEngine {
                 if (this.isEyeCurrentlyClosed && this.closedEyesStartTime) {
                     const closureDuration = (performance.now() - this.closedEyesStartTime) / 1000;
 
-                    // Condition 1: Normal blink is between 80ms and 500ms
-                    if (closureDuration >= 0.08 && closureDuration < 0.80) {
+                    // Condition 1: Normal blink is between 70ms and 550ms
+                    if (closureDuration >= 0.07 && closureDuration < 0.60) {
                         this.blinkCount++;
                         this.recentBlinks.push(Date.now());
+                        this.flashBlinkIndicator();
                         // Normal blinks NEVER trigger drowsiness!
                     }
                     // Condition 2: Prolonged slow closure with duration > 3.0 seconds
@@ -716,6 +746,41 @@ class FaceLandmarkEngine {
             }
         }
 
+        // 7. Update Driver HUD elements (if HUD mode is active)
+        const hudEar = document.getElementById('hud-val-ear');
+        const hudMar = document.getElementById('hud-val-mar');
+        const hudBlinks = document.getElementById('hud-val-blinks');
+        const hudPerclos = document.getElementById('hud-val-perclos');
+        const hudStateText = document.getElementById('hud-state-text');
+        const hudSubText = document.getElementById('hud-sub-text');
+        const hudStatusBadge = document.getElementById('hud-status-badge');
+
+        if (hudEar) hudEar.innerText = ear.toFixed(2);
+        if (hudMar) hudMar.innerText = mar.toFixed(2);
+        if (hudBlinks) hudBlinks.innerText = this.blinkCount;
+        if (hudPerclos) hudPerclos.innerText = perclos + '%';
+
+        if (hudStateText) {
+            hudStateText.innerText = state;
+            if (isWarning) {
+                hudStateText.className = 'hud-main-state text-danger';
+                if (hudSubText) hudSubText.innerText = 'WAKE UP! Immediate danger detected';
+                if (hudStatusBadge) hudStatusBadge.className = 'hud-status-badge badge-danger';
+            } else if (state === 'EYES_CLOSING') {
+                hudStateText.className = 'hud-main-state text-warning';
+                if (hudSubText) hudSubText.innerText = `Eyes closing (${durationSec.toFixed(1)}s)`;
+                if (hudStatusBadge) hudStatusBadge.className = 'hud-status-badge badge-warning';
+            } else if (state === 'YAWNING') {
+                hudStateText.className = 'hud-main-state text-warning';
+                if (hudSubText) hudSubText.innerText = 'Yawning detected (Fatigue alert)';
+                if (hudStatusBadge) hudStatusBadge.className = 'hud-status-badge badge-warning';
+            } else {
+                hudStateText.className = 'hud-main-state text-success';
+                if (hudSubText) hudSubText.innerText = 'Driver attentive & focused on road';
+                if (hudStatusBadge) hudStatusBadge.className = 'hud-status-badge badge-success';
+            }
+        }
+
         // Bridge to Embedded ESP32 Controller via MQTT
         if (window.hardwareBridge) {
             window.hardwareBridge.publishAlert(isWarning, state, durationSec, ear, perclos);
@@ -731,6 +796,114 @@ class FaceLandmarkEngine {
                 durationSec: Number(durationSec.toFixed(1)),
                 timestamp: Math.floor(Date.now() / 1000)
             });
+        }
+    }
+
+    /**
+     * Subtle pulse on blink counter when a legitimate normal blink occurs
+     */
+    flashBlinkIndicator() {
+        const valBlinks = document.getElementById('val-blinks');
+        if (valBlinks) {
+            valBlinks.classList.add('blink-pulse');
+            setTimeout(() => valBlinks.classList.remove('blink-pulse'), 350);
+        }
+        const hudBlinks = document.getElementById('hud-val-blinks');
+        if (hudBlinks) {
+            hudBlinks.classList.add('blink-pulse');
+            setTimeout(() => hudBlinks.classList.remove('blink-pulse'), 350);
+        }
+    }
+
+    /**
+     * Start Automatic Eye Baseline Calibration
+     */
+    startCalibration() {
+        if (!this.isRunning) {
+            alert('Please start the camera stream before calibrating eyes.');
+            return;
+        }
+        this.isCalibrating = true;
+        this.calibrationSamples = [];
+        const overlay = document.getElementById('calibration-overlay');
+        if (overlay) overlay.classList.remove('hidden');
+        const prog = document.getElementById('calib-progress-fill');
+        if (prog) prog.style.width = '0%';
+    }
+
+    /**
+     * Complete Eye Baseline Calibration and compute optimal personalized threshold
+     */
+    completeCalibration() {
+        this.isCalibrating = false;
+        const overlay = document.getElementById('calibration-overlay');
+        if (overlay) overlay.classList.add('hidden');
+
+        if (this.calibrationSamples.length > 0) {
+            // Sort samples to calculate median open-eye baseline
+            this.calibrationSamples.sort((a, b) => a - b);
+            const midIndex = Math.floor(this.calibrationSamples.length / 2);
+            const medianEar = this.calibrationSamples[midIndex];
+            this.baselineEar = Number(medianEar.toFixed(2));
+
+            // Set EAR threshold to 65% of natural resting baseline (bounded safely between 0.14 and 0.22)
+            const recommended = Math.max(0.14, Math.min(0.22, Number((medianEar * 0.65).toFixed(2))));
+            this.earThreshold = recommended;
+
+            if (window.settingsMgr) {
+                window.settingsMgr.set({
+                    earThreshold: this.earThreshold,
+                    baselineEar: this.baselineEar
+                });
+            }
+
+            // Live update sliders and value badges
+            const setInput = document.getElementById('setting-ear-thresh');
+            const setLbl = document.getElementById('setting-lbl-ear');
+            const inputEar = document.getElementById('input-ear-thresh');
+            const lblEar = document.getElementById('lbl-ear-thresh');
+            const lblBase = document.getElementById('val-baseline-ear');
+
+            if (setInput) setInput.value = this.earThreshold;
+            if (setLbl) setLbl.innerText = this.earThreshold.toFixed(2);
+            if (inputEar) inputEar.value = this.earThreshold;
+            if (lblEar) lblEar.innerText = this.earThreshold.toFixed(2);
+            if (lblBase) lblBase.innerText = this.baselineEar.toFixed(2);
+
+            // Trigger non-intrusive confirmation toast
+            const toast = document.getElementById('calib-toast');
+            if (toast) {
+                toast.innerHTML = `<i class="fa-solid fa-circle-check"></i> Calibrated! Baseline: <b>${this.baselineEar}</b> | Threshold: <b>${this.earThreshold}</b>`;
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 4000);
+            }
+        }
+    }
+
+    /**
+     * Toggle Distraction-Free Driver HUD Mode
+     */
+    toggleDriverHud(forceState) {
+        this.driverHudMode = (forceState !== undefined) ? forceState : !this.driverHudMode;
+        if (window.settingsMgr) {
+            window.settingsMgr.set({ driverHudMode: this.driverHudMode });
+        }
+
+        const hudOverlay = document.getElementById('driver-hud-overlay');
+        const btnHud = document.getElementById('btn-toggle-hud');
+        const videoCard = document.querySelector('.video-card');
+
+        if (hudOverlay) {
+            hudOverlay.classList.toggle('hidden', !this.driverHudMode);
+        }
+        if (btnHud) {
+            btnHud.classList.toggle('active', this.driverHudMode);
+            btnHud.innerHTML = this.driverHudMode ? 
+                '<i class="fa-solid fa-gauge"></i> HUD: ON' : 
+                '<i class="fa-solid fa-gauge"></i> HUD Mode';
+        }
+        if (videoCard) {
+            videoCard.classList.toggle('hud-mode-active', this.driverHudMode);
         }
     }
 }

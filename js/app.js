@@ -93,6 +93,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // 3b. Eye Auto-Calibration & Driver HUD Mode Controls
+    const btnCalibrateEyes = document.getElementById('btn-calibrate-eyes');
+    const btnSettingsCalibrate = document.getElementById('btn-settings-calibrate');
+    const btnToggleHud = document.getElementById('btn-toggle-hud');
+    const btnExitHud = document.getElementById('btn-exit-hud');
+
+    if (btnCalibrateEyes) {
+        btnCalibrateEyes.addEventListener('click', () => {
+            if (window.faceEngine) window.faceEngine.startCalibration();
+        });
+    }
+
+    if (btnSettingsCalibrate) {
+        btnSettingsCalibrate.addEventListener('click', () => {
+            if (window.faceEngine) {
+                // Switch to detector view so user can see calibration in progress
+                const detectorBtn = document.querySelector('[data-tab="tab-detector"]');
+                if (detectorBtn) detectorBtn.click();
+                window.faceEngine.startCalibration();
+            }
+        });
+    }
+
+    if (btnToggleHud) {
+        btnToggleHud.addEventListener('click', () => {
+            if (window.faceEngine) window.faceEngine.toggleDriverHud();
+        });
+    }
+
+    if (btnExitHud) {
+        btnExitHud.addEventListener('click', () => {
+            if (window.faceEngine) window.faceEngine.toggleDriverHud(false);
+        });
+    }
+
     // 4. Audio Controls & Warning Dismissal
     const btnAudioToggle = document.getElementById('btn-audio-toggle');
     const btnDismissAlarm = document.getElementById('btn-dismiss-alarm');
@@ -178,6 +213,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (setFacingMode) setFacingMode.value = s.facingMode;
         if (setMultiFaceMode) setMultiFaceMode.value = s.multiFaceMode;
         if (setAutoTrack) setAutoTrack.value = (s.autoTrackingEnabled !== false) ? 'true' : 'false';
+
+        const valBase = document.getElementById('val-baseline-ear');
+        if (valBase) valBase.innerText = (s.baselineEar || 0.26).toFixed(2);
     }
 
     // Dynamic slider listeners for instant feedback

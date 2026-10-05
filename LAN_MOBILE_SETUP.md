@@ -96,7 +96,7 @@ For quick 1-minute testing without certificates or ADB:
 ## Testing Verification Checklist
 1. **Camera Starts**: Green "Camera Active" pill appears.
 2. **Face Mesh Overlays**: Landmarks align with your face in the preview.
-3. **EAR Updates**: Displays ~0.30 - 0.35 when eyes are open; drops below 0.21 when closed.
-4. **Blink Counter**: Short closures (100–400 ms) increment the blink count and update blink rate.
-5. **Drowsiness Warning**: Closing eyes for >= 1.5s triggers `WARNING`, siren sounds, and virtual ESP32 Red LED/Buzzer activate.
+3. **EAR Updates**: Displays ~0.24 - 0.32 when eyes are naturally open; drops below 0.17 when closed.
+4. **Blink Counter**: Short closures (70–450 ms) increment the blink count without flickering the AWAKE state.
+5. **Drowsiness Warning**: Closing eyes for >= 3.5s triggers `WARNING`, siren sounds, and virtual ESP32 Red LED/Buzzer activate.
 6. **MQTT Sync**: If connected to ESP32 / Wokwi, the physical or simulated OLED displays the warning text instantly.

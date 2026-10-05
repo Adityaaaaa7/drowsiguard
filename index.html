@@ -83,6 +83,9 @@
             </div>
         </div>
 
+        <!-- Calibration Notification Toast -->
+        <div id="calib-toast" class="calib-toast"></div>
+
         <!-- ========================================================================= -->
         <!-- SECTION 1: MONITOR (Dedicated Driver Cockpit View)                       -->
         <!-- ========================================================================= -->
@@ -102,6 +105,12 @@
                     <div class="card-header">
                         <h2><i class="fa-solid fa-camera"></i> Driver Camera Feed</h2>
                         <div class="camera-controls">
+                            <button id="btn-calibrate-eyes" class="btn-subtle" title="Auto-Calibrate Resting Eye Baseline">
+                                <i class="fa-solid fa-crosshairs"></i> Calibrate Eyes
+                            </button>
+                            <button id="btn-toggle-hud" class="btn-subtle" title="Toggle Distraction-Free Driver HUD Mode">
+                                <i class="fa-solid fa-gauge"></i> HUD Mode
+                            </button>
                             <button id="btn-toggle-autotrack" class="btn-subtle active" title="Toggle Motion Auto-Tracking">
                                 <i class="fa-solid fa-arrows-to-dot"></i> Auto-Track: ON
                             </button>
@@ -135,6 +144,42 @@
                         <!-- Multi-Face Detection Alert Badge -->
                         <div id="badge-multiface-alert" class="multiface-badge hidden">
                             <i class="fa-solid fa-users"></i> Multiple Faces Detected (Tracking Driver)
+                        </div>
+
+                        <!-- Interactive Eye Baseline Auto-Calibration Overlay -->
+                        <div id="calibration-overlay" class="calibration-overlay hidden">
+                            <div class="calib-box">
+                                <div class="calib-spinner"><i class="fa-solid fa-crosshairs fa-spin"></i></div>
+                                <h4>Calibrating Natural Eye Aperture</h4>
+                                <p>Look forward normally with relaxed eyes. No need to force them wide!</p>
+                                <div class="calib-progress-track">
+                                    <div id="calib-progress-fill" class="calib-progress-fill" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Anti-Distraction Driver HUD Mode Overlay (Prevents night glare & driver distraction) -->
+                        <div id="driver-hud-overlay" class="driver-hud-overlay hidden">
+                            <div class="hud-content">
+                                <div class="hud-top-bar">
+                                    <div id="hud-status-badge" class="hud-status-badge badge-success">
+                                        <span class="pulse-dot"></span> MONITORING ACTIVE
+                                    </div>
+                                    <button id="btn-exit-hud" class="btn-subtle hud-exit-btn" title="Restore Camera View">
+                                        <i class="fa-solid fa-camera"></i> Exit HUD
+                                    </button>
+                                </div>
+                                <div class="hud-state-display" id="hud-state-display">
+                                    <div class="hud-main-state text-success" id="hud-state-text">AWAKE</div>
+                                    <div class="hud-sub-state" id="hud-sub-text">Driver attentive & focused on road</div>
+                                </div>
+                                <div class="hud-metrics-row">
+                                    <div class="hud-metric"><span class="lbl">EAR</span><span class="val" id="hud-val-ear">0.00</span></div>
+                                    <div class="hud-metric"><span class="lbl">MAR</span><span class="val" id="hud-val-mar">0.00</span></div>
+                                    <div class="hud-metric"><span class="lbl">BLINKS</span><span class="val" id="hud-val-blinks">0</span></div>
+                                    <div class="hud-metric"><span class="lbl">PERCLOS</span><span class="val" id="hud-val-perclos">0%</span></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -196,11 +241,11 @@
                                 </div>
                                 <div class="progress-track">
                                     <div id="bar-ear" class="progress-fill ear-fill" style="width: 0%"></div>
-                                    <div class="threshold-line" style="left: 46%" title="EAR Threshold (0.21)"></div>
+                                    <div class="threshold-line" style="left: 38%" title="EAR Threshold (0.17)"></div>
                                 </div>
                                 <div class="gauge-sub">
-                                    <span>Closed (&lt;0.21)</span>
-                                    <span>Open (&gt;0.30)</span>
+                                    <span>Closed (&lt;0.17)</span>
+                                    <span>Relaxed / Awake (&gt;0.20)</span>
                                 </div>
                             </div>
 
@@ -272,8 +317,8 @@
                         <div class="setting-row">
                             <label for="input-ear-thresh">EAR Closed Threshold:</label>
                             <div class="setting-control">
-                                <input type="range" id="input-ear-thresh" min="0.12" max="0.30" step="0.01" value="0.21">
-                                <span id="lbl-ear-thresh">0.21</span>
+                                <input type="range" id="input-ear-thresh" min="0.10" max="0.28" step="0.01" value="0.17">
+                                <span id="lbl-ear-thresh">0.17</span>
                             </div>
                         </div>
                         <div class="setting-row">
@@ -390,12 +435,22 @@
                         <div class="setting-item">
                             <div class="setting-meta">
                                 <label for="setting-ear-thresh">EAR Closed Threshold</label>
-                                <p class="setting-desc">Values below this indicate eye closure (Default: 0.21)</p>
+                                <p class="setting-desc">Values below this indicate eye closure (Default: 0.17)</p>
                             </div>
                             <div class="setting-input-wrap">
-                                <input type="range" id="setting-ear-thresh" min="0.15" max="0.30" step="0.01" value="0.21">
-                                <span id="setting-lbl-ear" class="setting-val-badge">0.21</span>
+                                <input type="range" id="setting-ear-thresh" min="0.10" max="0.28" step="0.01" value="0.17">
+                                <span id="setting-lbl-ear" class="setting-val-badge">0.17</span>
                             </div>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-meta">
+                                <label>Personal Eye Baseline Calibration</label>
+                                <p class="setting-desc">Calibrates to your natural open eyes without forcing them wide (Baseline: <span id="val-baseline-ear">0.26</span>)</p>
+                            </div>
+                            <button id="btn-settings-calibrate" class="btn-primary" style="padding: 7px 12px; font-size: 11px;">
+                                <i class="fa-solid fa-crosshairs"></i> Run Calibration
+                            </button>
                         </div>
 
                         <div class="setting-item">

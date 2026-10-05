@@ -98,21 +98,21 @@ DrowsiGuard computes biometric metrics—such as **Eye Aspect Ratio (EAR)**, **M
 ## 📐 Biometric Detection Algorithms
 
 ### 1. Eye Aspect Ratio (EAR)
-Calculated using the 6 landmark points around each eye according to the Soukupová-Čech algorithm:
+Calculated using high-precision 3-point vertical eyelid aperture (including center pupil deflection lines) with aspect-corrected pixel geometry:
 
-$$\text{EAR} = \frac{\|p_2 - p_6\| + \|p_3 - p_5\|}{2 \cdot \|p_1 - p_4\|}$$
+$$\text{EAR} = \frac{\|p_{\text{top1}} - p_{\text{bot1}}\| + 2 \cdot \|p_{\text{top\_mid}} - p_{\text{bot\_mid}}\| + \|p_{\text{top2}} - p_{\text{bot2}}\|}{4 \cdot \|p_{\text{outer}} - p_{\text{inner}}\|}$$
 
-- **Normal Alert State**: $\text{EAR} \approx 0.28 - 0.35$
-- **Eye Closure Threshold**: $\text{EAR} < 0.21$
-- **Blink**: Temporary closure ($100\text{ ms} - 400\text{ ms}$)
-- **Micro-sleep / Drowsiness**: Continuous closure $\ge 1.5\text{ seconds}$
+- **Normal Alert / Relaxed State**: $\text{EAR} \approx 0.22 - 0.32$
+- **Calibrated Closure Threshold**: $\text{EAR} < 0.17$ (auto-calibrates to $65\%$ of personal baseline)
+- **Normal Blink**: Temporary closure ($70\text{ ms} - 450\text{ ms}$), smoothly debounced to prevent false alarms
+- **Prolonged Eye Closure / Drowsiness**: Continuous closure $\ge 3.5\text{ seconds}$ or $>5$ closures exceeding $3.0\text{ seconds}$
 
 ### 2. Mouth Aspect Ratio (MAR)
-Monitors mouth opening to detect yawning:
+Monitors 3-point vertical inner/outer lip apertures to detect authentic yawning while preventing false positives during speaking:
 
-$$\text{MAR} = \frac{\|m_2 - m_8\| + \|m_3 - m_7\| + \|m_4 - m_6\|}{2 \cdot \|m_1 - m_5\|}$$
+$$\text{MAR} = \frac{\|m_{\text{top1}} - m_{\text{bot1}}\| + 2 \cdot \|m_{\text{top\_center}} - m_{\text{bot\_center}}\| + \|m_{\text{top2}} - m_{\text{bot2}}\|}{4 \cdot \|m_{\text{left}} - m_{\text{right}}\|}$$
 
-- **Yawn Threshold**: $\text{MAR} > 0.60$ sustained for $\ge 2.0\text{ seconds}$
+- **Yawn Threshold**: $\text{MAR} > 0.65$ sustained for $\ge 2.0\text{ seconds}$
 
 ### 3. PERCLOS
 The proportion of time within a rolling 60-second window during which the eyes are closed at least 80%. A PERCLOS reading above 15% indicates significant operator fatigue.
@@ -305,9 +305,11 @@ drowsiguard/
 ## ⚙️ Telemetry & Settings Customization
 
 Under the **Settings** tab in the web interface, you can adjust:
-- **EAR Sensitivity**: Adjust the eye closure threshold (default: `0.21`).
-- **Closure Duration**: Time in seconds before triggering alarms (default: `1.5s`).
-- **Yawn Detection**: Toggle MAR calculations and sensitivity threshold (default: `0.60`).
+- **Personal Eye Auto-Calibration**: 1-click calibration tool that calculates your natural resting baseline without forcing eyes wide open.
+- **EAR Sensitivity**: Adjust the eye closure threshold (default calibrated: `0.17`).
+- **Closure Duration**: Time in seconds before triggering alarms (default: `3.5s`).
+- **Driver HUD Mode**: Anti-distraction, low-glare cockpit mode for safe night driving.
+- **Yawn Detection**: Toggle MAR calculations and sensitivity threshold (default: `0.65`).
 - **Buzzer & Siren Pitch**: Customize alarm frequency and audio tone patterns.
 - **MQTT Broker URL**: Switch between public test brokers (`broker.emqx.io`) or your local Mosquitto LAN broker.
 
